@@ -1,0 +1,53 @@
+Double PIby2=Math.PI/2;
+           Double[,] Poincare = new Double[blockW - 1, blockH - 1];
+           for (x = 1; x < blockW - 1; x++)
+           {
+               for (y = 1; y < blockH - 1; y++)
+               {
+				   Double x1 = thetaD[x, y - 1] - thetaD[x + 1, y - 1];
+				   Double x2=thetaD[x - 1, y - 1] - thetaD[x, y - 1];
+				   Double x3=thetaD[x - 1, y] - thetaD[x - 1, y - 1];
+				   Double x4=thetaD[x - 1, y + 1] - thetaD[x - 1, y];
+				   Double x5=thetaD[x, y + 1] - thetaD[x - 1, y + 1];
+				   Double x6=thetaD[x + 1, y + 1] - thetaD[x, y + 1];
+				   Double x7=thetaD[x + 1, y] - thetaD[x + 1, y + 1];
+				   Double x8=thetaD[x + 1, y - 1] - thetaD[x + 1, y];
+				   
+                   if(x1<PIby2) x1=x1;
+                   else if(x1< -PIby2) x1=Math.PI+x1;
+                   else x1=Math.PI-x1;
+                     if(x2<PIby2) x2=x2;
+                   else if(x2<-PIby2) x2=Math.PI+x2;
+                   else x2=Math.PI-x2;
+                     if(x3<PIby2) x3=x3;
+                   else if(x3<-PIby2) x3=Math.PI+x3;
+                   else x3=Math.PI-x3;
+                     if(x4<PIby2) x4=x4;
+                   else if(x4<-PIby2) x4=Math.PI+x4;
+                   else x4=Math.PI-x4;
+                     if(x5<PIby2) x5=x5;
+                   else if(x5<-PIby2) x5=Math.PI+x5;
+                   else x5=Math.PI-x5;
+                     if(x6<PIby2) x6=x6;
+                   else if(x6<-PIby2) x6=Math.PI+x6;
+                   else x6=Math.PI-x6;
+                     if(x7<PIby2) x7=x7;
+                   else if(x7<-PIby2) x7=Math.PI+x7;
+                   else x7=Math.PI-x7;
+                     if(x8<PIby2) x8=x8;
+                   else if(x8<-PIby2) x8=Math.PI+x8;
+                   else x8=Math.PI-x8;
+                  Poincare[x,y]=Math.Abs((x1+x2+x3+x4+x5+x6+x7+x8)/(2*Math.PI));
+               }
+           }
+           for (x = 1; x < blockW - 1; x++){
+               for (y = 1; y < blockH - 1; y++){
+                   if (Poincare[x, y] < 0.45 || Poincare[x, y] > 0.51){
+				   
+                   }
+                   els{
+				   		image.SetPixel(x , y, Color.Blue);
+                   }
+              }
+          }
+           }

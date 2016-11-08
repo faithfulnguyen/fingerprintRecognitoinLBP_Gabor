@@ -1,14 +1,13 @@
-/*
- * To change this license header, choose License Headers in Project Properties.
- * To change this template file, choose Tools | Templates
- * and open the template in the editor.
- */
 package fingerprint;
+import java.awt.print.Printable;
 import java.io.File;
 import java.util.ArrayList;
 import org.bytedeco.javacpp.indexer.UByteRawIndexer;
 import org.bytedeco.javacpp.opencv_core;
 import org.bytedeco.javacpp.opencv_core.Rect;
+import org.bytedeco.javacpp.opencv_core.Size;
+import org.bytedeco.javacpp.opencv_videostab.GaussianMotionFilter;
+
 import static org.bytedeco.javacpp.opencv_core.convertScaleAbs;
 import org.bytedeco.javacpp.opencv_imgcodecs;
 import static org.bytedeco.javacpp.opencv_imgcodecs.imread;
@@ -26,7 +25,10 @@ import static org.bytedeco.javacpp.opencv_core.CV_64F;
 import static org.bytedeco.javacpp.opencv_core.CV_PI;
 import org.bytedeco.javacpp.opencv_core.Mat;
 import static org.bytedeco.javacpp.opencv_core.normalize;
+import static org.bytedeco.javacpp.opencv_core.print;
 import org.bytedeco.javacpp.opencv_imgproc;
+import static org.bytedeco.javacpp.opencv_imgproc.CV_GRAY2RGB;
+import static org.bytedeco.javacpp.opencv_imgproc.GaussianBlur;
 import static org.bytedeco.javacpp.opencv_imgproc.calcHist;
 import static org.bytedeco.javacpp.opencv_imgproc.compareHist;
 import static org.bytedeco.javacpp.opencv_imgproc.filter2D;
@@ -47,7 +49,7 @@ public class Fingerprint {
     /**
      * @param args the command line arguments
      */
-    public static void main(String[] args) {
+    public static void main_version_1(String[] args) {
         // TODO code application logic here
         File folder = new File("");
         Fingerprint fg = new Fingerprint();
@@ -76,6 +78,18 @@ public class Fingerprint {
             fg.trainData.add(trt);
         }
         fg.matchFingerprint();
+    }
+    
+    public static void main(String[] args) {
+        Mat img = imread ("src/fingerprint/1_1.tif",opencv_imgcodecs.CV_LOAD_IMAGE_GRAYSCALE);
+        resize(img,img,new Size(120,120));
+        
+        Mat normailizedImg = normalizeSubWindow(img);
+        imwrite("img.jpg", normailizedImg);
+        Fingerprint fp = new Fingerprint();
+        Mat[] ori = fp.localSmooth(normailizedImg);
+        Mat smooth = fp.smoothedOrientation(ori[0], ori[1]);
+        fp.pointCare(smooth, img);
     }
     
     public static opencv_core.Mat normalizeSubWindow(opencv_core.Mat image){
@@ -307,40 +321,172 @@ public class Fingerprint {
         return score;
     }
     
-    public static opencv_core.Mat orienImage(Mat image){
-        int block = 8;
-        opencv_core.Mat orient = new opencv_core.Mat(image.rows() - block / 2, image.cols() - block / 2, image.type());
-        opencv_core.Mat grad_x = new opencv_core.Mat(), grad_y = new opencv_core.Mat();
-        opencv_core.Mat abs_grad_x = new opencv_core.Mat(), abs_grad_y = new opencv_core.Mat();
-        Sobel(image, grad_x, image.type(), 1, 0, 3, 1, 0, BORDER_DEFAULT );
-        convertScaleAbs( grad_x, abs_grad_x );
-        Sobel(image, grad_y, image.type(), 0, 1, 3, 1, 0, BORDER_DEFAULT );
-        convertScaleAbs( grad_y, abs_grad_y );
-        UByteRawIndexer dst = orient.createIndexer();
-        for(int i = 0; i < image.rows() / block; i += block){
-            for(int j = 0; j < image.cols()/  block; j += block){
-                Mat dirX = abs_grad_x.apply(new Rect(i, j, block, block));
-                Mat dirY = abs_grad_y.apply(new Rect(i, j, block, block));
-                UByteRawIndexer ix = dirX.createIndexer();
-                UByteRawIndexer iy = dirY.createIndexer();
-                int x = dirX.rows() / 2;
-                int y = dirX.cols() / 2;
-                double ox = 0;
-                double oy = 0;
-                for(int r =  x - block / 2; r < x + block / 2; r++){
-                    for(int c = y - block / 2; c < y + block / 2; c++){
-                        ox += (2 * (ix.get(r, c) - iy.get(r, c)));
-                        double tmp = ix.get(r, c) * ix.get(r, c);
-                        double tmp1 = iy.get(r, c) * iy.get(r, c);
-                        oy += (tmp - tmp1);
-                    }
-                }
-                int ori = (int) ((int)0.5 * Math.atan(oy/ox));
-                dst.put( i , j, ori);
-                
+    // http://biomisa.org/wp-content/uploads/2013/07/fp_10.pdf
+    
+    public Mat[] sobelDerivatives(Mat image){
+    	int scale = 1;
+    	int delta = 0;
+    	Mat grad_x = new Mat(), grad_y = new Mat();
+    	//Mat abs_grad_x = new Mat(), abs_grad_y = new Mat();
+
+    	Sobel( image, grad_x, 0, 1, 0, 3, scale, delta, BORDER_DEFAULT );
+    	//convertScaleAbs( grad_x, abs_grad_x );
+
+    	Sobel( image, grad_y, 0, 0, 1, 3, scale, delta, BORDER_DEFAULT );
+    	//convertScaleAbs( grad_y, abs_grad_y );
+    	return new Mat[]{grad_x, grad_y} ;
+    }
+    
+    public double blockOrientation( Mat blck_sbl_x, Mat blck_sbl_y){
+    	double v_x = 0;
+    	double v_y = 0;
+        int i = blck_sbl_x.rows()/2;
+        int j = blck_sbl_x.cols()/2;
+        int w = blck_sbl_x.rows();
+    	UByteRawIndexer idx_x = blck_sbl_x.createIndexer();
+    	UByteRawIndexer idx_y = blck_sbl_y.createIndexer();
+    	for(int u = i - w/2; u < i + w/2; u++){
+            for(int v = j - w/2; v < j + w/2; v++){
+                v_x += 2 * idx_x.get(u, v) * idx_y.get(u, v);
+                v_y += idx_x.get(u, v)*idx_x.get(u, v) - idx_y.get(u, v)*idx_y.get(u, v);
+            }
+    	}
+    	double theta = 0.5 * (Math.PI +  Math.atan(v_y/v_x));
+    	return theta;
+    }
+    
+    public Mat localOrientation(Mat img, Mat blck_sbl_x, Mat blck_sbl_y){
+    	int w = 10;
+    	Mat oriImg = new Mat(img.rows()/ w, img.cols()/ w, opencv_core.CV_64F);
+    	DoubleRawIndexer idx = oriImg.createIndexer();
+    	int ori_i = 0;
+    	int ori_j = 0;
+    	for(int i = 0; i < img.rows(); i += w){
+            for(int j = 0; j < img.cols(); j += w){
+                Mat sbX = blck_sbl_x.apply(new Rect(j, i, w, w));
+                Mat sbY = blck_sbl_y.apply(new Rect(j, i, w, w));
+                double ori = blockOrientation(sbX, sbY);
+                idx.put(ori_i,ori_j, ori);
+                ori_j ++;
+            }
+            ori_j = 0;
+            ori_i ++;
+    	}
+        //print(oriImg);
+    	return oriImg;
+    }
+    
+    public Mat[] localSmooth(Mat img){
+    	Mat[] sb = sobelDerivatives(img);
+    	Mat ori = localOrientation(img, sb[0], sb[1]);
+    	Mat sinY = ori.clone();
+    	Mat cosX = ori.clone();
+    	DoubleRawIndexer idx_o = ori.createIndexer();
+    	DoubleRawIndexer idx_x = cosX.createIndexer();
+    	DoubleRawIndexer idx_y = sinY.createIndexer();
+    	for(int i = 0; i < ori.rows(); i++){
+            for(int j = 0; j <ori.cols(); j++){
+                idx_x.put(i, j, 2 * Math.cos(idx_o.get(i, j)));
+                idx_y.put(i, j, 2 * Math.sin(idx_o.get(i, j)));
+            }
+    	}
+    	return new Mat[]{ cosX, sinY};
+    }
+
+    public Mat smoothedOrientation(Mat cosX, Mat sinY){
+        opencv_imgproc.GaussianBlur(cosX, cosX, new Size(3,3), 0);
+        opencv_imgproc.GaussianBlur(sinY, sinY, new Size(3,3), 0);
+        Mat smooth = cosX.clone();
+        DoubleRawIndexer idx_s = smooth.createIndexer();
+        DoubleRawIndexer idx_x = cosX.createIndexer();
+        DoubleRawIndexer idx_y = sinY.createIndexer();
+        for(int i = 0; i < smooth.rows(); i++){
+            for(int j = 0; j < smooth.cols(); j++){
+                double theta = 0.5 * Math.atan(idx_y.get(i, j) / idx_x.get(i,j));
+                idx_s.put(i, j, theta);
             }
         }
-        return orient;
-    } 
+        
+    	return smooth;
+    }
+    public void pointCare(Mat smooth, Mat img){
+    	Mat siglar = smooth.clone();
+    	DoubleRawIndexer index = siglar.createIndexer();
+       
+        Mat rgb = new Mat();
+        opencv_imgproc.cvtColor(img, rgb, CV_GRAY2RGB );
+        UByteRawIndexer idxI = rgb.createIndexer();
+        opencv_core.MatExpr d = Mat.zeros(new Size(smooth.rows() + 2, smooth.cols() + 2) , CV_64F);
+        Mat zero = d.asMat();
+        Mat border = zero.apply(new Rect(1, 1, smooth.rows(), smooth.cols()));
+        smooth.copyTo(border);
+        int w = 3;
+    	for(int r = 0; r < smooth.rows(); r ++){
+            for(int c = 0; c < smooth.cols(); c ++){
+                Mat tmp = zero.apply(new Rect(c, r, w, w));
+                double beta = calcNeighbors(tmp);
+                index.put(r, c, beta);
+            }
+    	}
+        
+        for(int i = 0; i < siglar.rows(); i++){
+            for(int j = 0; j < siglar.cols(); j++){
+                if(index.get(i, j) > 0.5 && index.get(i, j) <= 0.51){
+                    //System.out.println(i*10 + " " + j*10); 
+                    for(int r = 0; r < 5; r++){
+                        idxI.put(i*10 + r, j*10 + r, 0, 150);
+                    idxI.put(i*10 + r, j*10 + r, 1, 0);
+                    idxI.put(i*10 + r, j*10 + r, 2, 0);
+                    }
+                    
+                }
+            }
+        }
+        imwrite("img.jpg", rgb);
+        
+       //print(siglar);
+    }
+    
+    public double calcNeighbors(Mat tmp){
+        int i = tmp.rows() / 2;
+        int j = tmp.cols() / 2;
+        DoubleRawIndexer idx = tmp.createIndexer();
+        double beta = 0;
+        double pc = Math.abs(Math.sin(idx.get(i + 1, j - 1)) - Math.sin(idx.get(i + 1, j))); // O2 - O1
+        beta += checkConditional(pc);
+        
+        pc = Math.abs(Math.sin(idx.get(i, j - 1)) - Math.sin(idx.get(i + 1, j - 1))); // O3 - O2
+        beta += checkConditional(pc);
+        
+        pc = Math.abs(Math.sin(idx.get(i - 1, j - 1)) - Math.sin(idx.get(i, j - 1))); //04- O3
+        beta += checkConditional(pc);
+        
+        pc = Math.abs(Math.sin(idx.get(i - 1, j)) - Math.sin(idx.get(i - 1, j - 1))); // 05 - 04
+        beta += checkConditional(pc);
+        
+        pc = Math.abs(Math.sin(idx.get(i - 1, j + 1)) - Math.sin(idx.get(i - 1, j))); // 06 - 05
+        beta += checkConditional(pc);
+        
+        pc = Math.abs(Math.sin(idx.get(i, j + 1)) - Math.sin(idx.get(i - 1, j + 1))); // 07 - 06
+        beta += checkConditional(pc);
+        
+        pc = Math.abs(Math.sin(idx.get(i + 1, j + 1)) - Math.sin(idx.get(i, j + 1))); // 08 - 07
+        beta += checkConditional(pc);
+       
+        beta /= ( 2 * CV_PI);
+        return beta;   
+        
+    }
+    
+    public double checkConditional(double pc){
+        double beta = 0;
+        if(pc <= (CV_PI / 2) && pc > -1.0 * CV_PI / 2)
+            beta = pc;
+        else if(pc <= (-1.0 * CV_PI / 2 ))
+            beta = pc; 
+        else beta = pc - CV_PI;
+        return beta;
+    }
+
     
 }
